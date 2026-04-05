@@ -1,0 +1,733 @@
+================================================================================
+       ODOO POS CAFE — FULL PROJECT PROMPT (STEP BY STEP)
+       Frontend: React JS | Backend: Python Django | Database: MySQL
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 1 — PROJECT OVERVIEW
+────────────────────────────────────────────────────────────────────────────────
+
+Project Name   : Odoo POS Cafe
+Type           : Restaurant Point-of-Sale (POS) Web Application
+Frontend       : React JS (with React Router, Axios, Tailwind CSS)
+Backend        : Python Django (Django REST Framework)
+Database       : MySQL
+Auth           : JWT Token-based Authentication
+Real-time      : Django Channels (WebSocket) for Kitchen Display
+
+Short Description:
+  A full-featured restaurant POS system with 3 separate portals —
+  Admin/Manager, Kitchen Staff, and User/Cashier — each with their own
+  login, dashboard, and functionality. Covers table ordering, kitchen
+  display, multiple payment methods (Cash, Card, UPI QR), and reporting.
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 2 — TECH STACK DETAILS
+────────────────────────────────────────────────────────────────────────────────
+
+FRONTEND (React JS):
+  - React JS (v18+)
+  - React Router DOM (for multi-page routing)
+  - Axios (API calls to Django backend)
+  - Tailwind CSS (styling)
+  - React Context API or Redux (global state management)
+  - React QR Code library (for UPI QR generation)
+  - Socket.io-client or native WebSocket (for Kitchen Display real-time)
+
+BACKEND (Python Django):
+  - Python 3.10+
+  - Django 4.x
+  - Django REST Framework (DRF) — all APIs as REST endpoints
+  - djangorestframework-simplejwt — JWT authentication
+  - Django Channels — WebSocket for real-time kitchen updates
+  - django-cors-headers — allow React frontend to call Django APIs
+  - Pillow — image handling (product images)
+  - qrcode (Python library) — generate UPI QR codes server-side
+  - django-filter — filter support in reporting APIs
+
+DATABASE (MySQL):
+  - MySQL 8.x
+  - Connected via Django's DATABASES setting using mysqlclient
+  - All models defined in Django ORM (no raw SQL needed)
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 3 — USER ROLES & PORTALS
+────────────────────────────────────────────────────────────────────────────────
+
+There are 3 portals. Each has a separate login and separate dashboard.
+
+PORTAL 1 — ADMIN / MANAGER
+  Route Prefix : /admin-portal
+  Access       : Admin users only (role = "admin")
+  Features     :
+    - Login & Signup
+    - Product Management (CRUD)
+    - Payment Method Setup (Cash, Digital, UPI QR toggle + UPI ID)
+    - Floor Plan & Table Management
+    - POS Terminal Setup & Session Management
+    - Self Ordering token generation
+    - Reports & Dashboard (Sales, Session, Staff, Product filters)
+    - Export reports as PDF / XLS
+
+PORTAL 2 — KITCHEN STAFF
+  Route Prefix : /kitchen
+  Access       : Kitchen users only (role = "kitchen")
+  Features     :
+    - Login (simple, no signup)
+    - Kitchen Display Screen
+    - View incoming orders in real-time
+    - Update order status: To Cook → Preparing → Completed
+    - Mark individual items as prepared (strikethrough)
+    - Ticket number matches Order number
+
+PORTAL 3 — USER / CASHIER
+  Route Prefix : /pos
+  Access       : Cashier/Staff users (role = "cashier")
+  Features     :
+    - Login
+    - Open POS Session
+    - Floor View (select table)
+    - Order Screen (add products, adjust quantity)
+    - Send order to Kitchen Display
+    - Payment Screen (Cash / Digital / UPI QR)
+    - UPI QR Payment flow with confirmation
+    - Customer Display Screen
+    - Handle self-order tokens from customers
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 4 — DATABASE MODELS (MySQL via Django ORM)
+────────────────────────────────────────────────────────────────────────────────
+
+1. User
+   - id, username, email, password (hashed), role (admin/kitchen/cashier)
+   - created_at, is_active
+
+2. Category
+   - id, name, description
+
+3. Product
+   - id, name, category (FK → Category), price, unit, tax_percent
+   - description, image, is_active
+   - send_to_kitchen (boolean — whether this product goes to kitchen)
+
+4. ProductVariant
+   - id, product (FK → Product), attribute (e.g. "Pack"), value (e.g. "6 items")
+   - extra_price
+
+5. PaymentMethod
+   - id, name (Cash/Digital/UPI), is_enabled (boolean)
+   - upi_id (nullable, for UPI only)
+
+6. Floor
+   - id, name (e.g. "Ground Floor"), is_active
+
+7. Table
+   - id, floor (FK → Floor), table_number, seats, is_active
+   - appointment_resource (optional text)
+
+8. POSSession
+   - id, opened_by (FK → User), opened_at, closed_at
+   - status (open/closed), closing_sale_amount
+
+9. Order
+   - id, session (FK → POSSession), table (FK → Table)
+   - order_number (auto-generated), status (draft/sent/paid)
+   - created_by (FK → User), created_at
+   - self_order_token (nullable — for self ordering)
+
+10. OrderItem
+    - id, order (FK → Order), product (FK → Product)
+    - quantity, unit_price, subtotal
+    - kitchen_status (to_cook/preparing/completed)
+    - is_prepared (boolean — item-level marking)
+
+11. Payment
+    - id, order (FK → Order), method (FK → PaymentMethod)
+    - amount, paid_at, status (pending/confirmed)
+
+12. SelfOrderToken
+    - id, token (UUID), table (FK → Table), session (FK → POSSession)
+    - created_at, is_used
+
+13. Report (optional virtual — generated from Orders + Payments)
+    - No separate table needed; reports are aggregated queries on Orders
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 5 — DJANGO REST API ENDPOINTS
+────────────────────────────────────────────────────────────────────────────────
+
+AUTH ENDPOINTS:
+  POST   /api/auth/signup/           → Register new user
+  POST   /api/auth/login/            → Login, returns JWT access + refresh tokens
+  POST   /api/auth/token/refresh/    → Refresh JWT token
+  GET    /api/auth/me/               → Get current user info
+
+PRODUCT ENDPOINTS:
+  GET    /api/products/              → List all products
+  POST   /api/products/              → Create product (admin only)
+  GET    /api/products/:id/          → Get product detail
+  PUT    /api/products/:id/          → Update product (admin only)
+  DELETE /api/products/:id/          → Delete product (admin only)
+  GET    /api/categories/            → List categories
+  POST   /api/categories/            → Create category
+
+PAYMENT METHOD ENDPOINTS:
+  GET    /api/payment-methods/       → List all payment methods
+  PUT    /api/payment-methods/:id/   → Update method (enable/disable, UPI ID)
+
+FLOOR & TABLE ENDPOINTS:
+  GET    /api/floors/                → List floors
+  POST   /api/floors/                → Create floor
+  GET    /api/floors/:id/tables/     → Get tables for a floor
+  POST   /api/tables/                → Create table
+  PUT    /api/tables/:id/            → Update table
+  DELETE /api/tables/:id/            → Delete table
+
+POS SESSION ENDPOINTS:
+  POST   /api/sessions/open/         → Open a new POS session
+  POST   /api/sessions/:id/close/    → Close session
+  GET    /api/sessions/current/      → Get currently open session
+
+ORDER ENDPOINTS:
+  GET    /api/orders/                → List orders (filter by session/table)
+  POST   /api/orders/                → Create new order
+  GET    /api/orders/:id/            → Get order detail
+  PUT    /api/orders/:id/            → Update order
+  POST   /api/orders/:id/send-to-kitchen/  → Push order to kitchen
+  POST   /api/orders/:id/pay/        → Record payment for order
+
+ORDER ITEM ENDPOINTS:
+  POST   /api/orders/:id/items/      → Add item to order
+  PUT    /api/order-items/:id/       → Update item quantity
+  DELETE /api/order-items/:id/       → Remove item from order
+  PATCH  /api/order-items/:id/kitchen-status/  → Update kitchen status
+
+KITCHEN ENDPOINTS:
+  GET    /api/kitchen/orders/        → Get all active kitchen orders
+  PATCH  /api/kitchen/orders/:id/status/       → Move order stage
+  PATCH  /api/kitchen/items/:id/prepared/      → Mark item as prepared
+
+SELF ORDER ENDPOINTS:
+  POST   /api/self-order/token/      → Generate token for table
+  POST   /api/self-order/place/      → Place order using token
+
+UPI / PAYMENT ENDPOINTS:
+  GET    /api/payment/qr/:order_id/  → Generate UPI QR code image for order
+  POST   /api/payment/confirm/       → Confirm UPI payment
+
+REPORT ENDPOINTS:
+  GET    /api/reports/dashboard/     → Summary stats (total sales, orders, etc.)
+  GET    /api/reports/sales/         → Sales list with filters
+  GET    /api/reports/export/pdf/    → Export report as PDF
+  GET    /api/reports/export/xls/    → Export report as Excel
+
+WEBSOCKET (Django Channels):
+  ws://  /ws/kitchen/                → Real-time kitchen order updates
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 6 — FRONTEND PAGES & COMPONENTS (React JS)
+────────────────────────────────────────────────────────────────────────────────
+
+── SHARED ──
+
+  /login                   → Unified login page (role-based redirect after login)
+  /signup                  → Signup page (admin role creation)
+  Components:
+    - <Navbar />
+    - <ProtectedRoute role="admin|kitchen|cashier" />
+    - <LoadingSpinner />
+    - <Toast /> (success/error notifications)
+
+
+── PORTAL 1: ADMIN (/admin-portal) ──
+
+  /admin-portal/dashboard
+    - Summary cards: Total sales today, open sessions, total orders
+    - Pie chart: Sales by category
+    - Bar chart: Sales by day/week
+    - Filters: Period, Session, Staff, Product
+    - Export buttons: PDF, XLS
+
+  /admin-portal/products
+    - Product list table (Name, Category, Price, Tax, Status)
+    - Add/Edit Product modal form:
+        Fields: Name, Category, Price, Unit, Tax%, Description, Image
+        Variants tab: Attribute + Values + Extra Price
+    - Delete confirmation
+
+  /admin-portal/categories
+    - Category list
+    - Add/Edit/Delete category
+
+  /admin-portal/payment-methods
+    - Cards for Cash, Digital, UPI QR with toggle switch
+    - UPI card shows UPI ID input field when enabled
+    - Save button per method
+
+  /admin-portal/floors
+    - Floor list with "Add Floor" button
+    - Each floor shows its tables in a grid
+    - Add/Edit/Delete table modal:
+        Fields: Table Number, Seats, Active toggle, Appointment Resource
+
+  /admin-portal/terminal
+    - POS Terminal card showing:
+        Last session info, Last closing amount
+        "Open Session" button → navigates to /pos
+
+  /admin-portal/reports
+    - Filter bar: Date range picker, Session selector, Staff selector, Product selector
+    - Summary stats: Total revenue, Total orders, Top product
+    - Data table: Order #, Table, Items, Amount, Payment method, Time
+    - Export PDF / Export XLS buttons
+
+
+── PORTAL 2: KITCHEN (/kitchen) ──
+
+  /kitchen/login
+    - Simple login form for kitchen staff
+
+  /kitchen/display
+    - Top bar: Session info, clock
+    - Order cards grid layout (4 columns)
+    - Each card shows:
+        Ticket / Order number
+        List of items with quantities
+        Stage badge: To Cook (red) / Preparing (amber) / Completed (green)
+    - Click card → moves to next stage
+    - Click item in card → marks item as prepared (strikethrough)
+    - Real-time updates via WebSocket
+
+
+── PORTAL 3: USER / CASHIER (/pos) ──
+
+  /pos/login
+    - Login form for cashier/staff
+
+  /pos/session
+    - "Open Session" screen with terminal info
+    - Button: Open Session → redirect to /pos/floor
+
+  /pos/floor
+    - Top navigation bar:
+        Left: "Table" tab, "Register" tab
+        Right: Reload Data, Go to Backend, Close Register buttons
+    - Table grid: cards showing table number + status (free/occupied)
+    - Click table → go to /pos/order/:tableId
+
+  /pos/order/:tableId
+    - Left panel: Product grid (filter by category tabs)
+        Product cards with name + price
+        Click to add to cart
+    - Right panel: Cart / Order lines
+        Item name, quantity (+/-), unit price, subtotal
+        Order total at bottom
+    - Action buttons:
+        "Send to Kitchen" → POST /api/orders/:id/send-to-kitchen/
+        "Payment" → navigate to /pos/payment/:orderId
+
+  /pos/payment/:orderId
+    - Order summary at top (items + total amount)
+    - Payment method selector: Cash | Digital/Card | UPI QR
+    - "Validate Payment" button
+    - On validate → show Confirmation screen
+    - On UPI QR selected:
+        Show QR code (fetched from backend)
+        Amount + UPI QR label
+        Buttons: "Confirmed" / "Cancel"
+        On Confirmed → Payment Confirmation screen
+        Click anywhere → return to /pos/floor
+
+  /pos/customer-display
+    - Separate window/route opened for customer-facing screen
+    - Shows: current order items, total, payment status (Paid/Unpaid)
+    - Updates in real-time
+
+  /pos/self-order/:token
+    - Customer self-order screen (accessed via token link/QR)
+    - Shows menu, customer selects items
+    - Submits → order created automatically → sent to Kitchen
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 7 — COMPLETE END-TO-END FLOW
+────────────────────────────────────────────────────────────────────────────────
+
+STEP 1 — SETUP (Admin)
+  1. Admin signs up / logs in at /login (role: admin)
+  2. Goes to /admin-portal/products → adds products with categories
+  3. Goes to /admin-portal/payment-methods → enables Cash, Digital, UPI QR
+     → enters UPI ID (e.g. 123@ybl.com)
+  4. Goes to /admin-portal/floors → creates "Ground Floor"
+     → adds tables (Table 3, Table 6, etc.) with seat counts
+  5. Goes to /admin-portal/terminal → confirms terminal is ready
+
+STEP 2 — OPEN SESSION (Cashier)
+  1. Cashier logs in at /login (role: cashier)
+  2. Lands on /pos/session → clicks "Open Session"
+  3. Django creates a new POSSession record (status: open)
+  4. Redirected to /pos/floor
+
+STEP 3 — TAKE ORDER (Cashier)
+  1. Cashier sees floor view at /pos/floor
+  2. Selects Table 3 → goes to /pos/order/3
+  3. Clicks products (Pizza x2, Coffee x1) → added to cart
+  4. Adjusts quantities using +/- buttons
+  5. Clicks "Send to Kitchen"
+     → Django creates Order + OrderItems records
+     → WebSocket pushes new order to /kitchen/display
+  6. Kitchen Staff see the new ticket appear in real-time
+
+STEP 4 — KITCHEN PROCESSING (Kitchen Staff)
+  1. Kitchen staff are logged in at /kitchen/display
+  2. See new ticket card: Order #101 — To Cook (red badge)
+  3. Click the card → status changes to "Preparing" (amber badge)
+     → PATCH /api/kitchen/orders/101/status/
+  4. Click individual items to mark as prepared (strikethrough)
+     → PATCH /api/kitchen/items/:id/prepared/
+  5. Click card again → status changes to "Completed" (green badge)
+
+STEP 5 — PAYMENT (Cashier)
+  1. Cashier goes back to order screen → clicks "Payment"
+  2. Sees Payment screen with total: $580
+  3. Selects payment method:
+
+     A) CASH:
+        → Enters amount tendered
+        → Click Validate → Confirmation screen → back to floor
+
+     B) DIGITAL/CARD:
+        → Click Validate → Confirmation screen → back to floor
+
+     C) UPI QR:
+        → QR code screen appears (generated from UPI ID)
+        → Customer scans QR with phone app
+        → Cashier clicks "Confirmed"
+        → "Amount Paid $580" confirmation screen
+        → Click anywhere → return to /pos/floor
+
+STEP 6 — SELF ORDERING (Optional Customer Flow)
+  1. Admin generates a self-order token for Table 5
+     → POST /api/self-order/token/ → returns UUID token
+     → System generates QR code for that token
+  2. Customer scans QR at table → opens /pos/self-order/:token
+  3. Customer browses menu → selects items → submits
+  4. Django auto-creates Order with token reference
+  5. Order sent directly to Kitchen Display (same WebSocket flow)
+  6. Cashier sees the order appear and handles payment when ready
+
+STEP 7 — CUSTOMER DISPLAY (Parallel)
+  1. A second screen (TV/tablet) runs /pos/customer-display
+  2. Shows the current table's order items in real-time
+  3. Shows payment status: UNPAID (red) → PAID (green)
+  4. After payment confirmed → shows "Thank you!" screen
+
+STEP 8 — REPORTS (Admin)
+  1. Admin goes to /admin-portal/reports
+  2. Applies filters:
+     - Period: Today / This Week / Custom date range
+     - Session: Select a specific session
+     - Responsible: Filter by staff member
+     - Product: Filter by a specific product
+  3. Views:
+     - Total revenue, Total orders, Average order value
+     - Best-selling products
+     - Orders data table
+  4. Clicks "Export PDF" → Django generates PDF with reportlab
+     Clicks "Export XLS" → Django generates Excel with openpyxl
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 8 — DJANGO PROJECT STRUCTURE
+────────────────────────────────────────────────────────────────────────────────
+
+pos_backend/
+├── manage.py
+├── requirements.txt
+├── pos_backend/
+│   ├── settings.py          ← MySQL config, JWT, CORS, Channels
+│   ├── urls.py              ← Root URL config
+│   ├── asgi.py              ← Django Channels ASGI config
+│   └── wsgi.py
+├── apps/
+│   ├── authentication/      ← User model, JWT login/signup views
+│   ├── products/            ← Product, Category, ProductVariant models & APIs
+│   ├── floors/              ← Floor, Table models & APIs
+│   ├── payment_methods/     ← PaymentMethod model & APIs
+│   ├── sessions/            ← POSSession model & APIs
+│   ├── orders/              ← Order, OrderItem, Payment models & APIs
+│   ├── kitchen/             ← Kitchen views, WebSocket consumer
+│   ├── self_order/          ← SelfOrderToken model & APIs
+│   └── reports/             ← Reporting views, PDF/XLS export
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 9 — REACT PROJECT STRUCTURE
+────────────────────────────────────────────────────────────────────────────────
+
+pos_frontend/
+├── public/
+├── src/
+│   ├── main.jsx
+│   ├── App.jsx              ← All routes defined here
+│   ├── api/
+│   │   └── axios.js         ← Axios instance with JWT interceptor
+│   ├── context/
+│   │   ├── AuthContext.jsx  ← User auth state
+│   │   └── POSContext.jsx   ← Current session, cart, table state
+│   ├── components/
+│   │   ├── Navbar.jsx
+│   │   ├── ProtectedRoute.jsx
+│   │   ├── Toast.jsx
+│   │   └── LoadingSpinner.jsx
+│   ├── pages/
+│   │   ├── Login.jsx
+│   │   ├── Signup.jsx
+│   │   ├── admin/
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── Products.jsx
+│   │   │   ├── Categories.jsx
+│   │   │   ├── PaymentMethods.jsx
+│   │   │   ├── Floors.jsx
+│   │   │   ├── Terminal.jsx
+│   │   │   └── Reports.jsx
+│   │   ├── kitchen/
+│   │   │   ├── KitchenLogin.jsx
+│   │   │   └── KitchenDisplay.jsx
+│   │   └── pos/
+│   │       ├── Session.jsx
+│   │       ├── FloorView.jsx
+│   │       ├── OrderScreen.jsx
+│   │       ├── PaymentScreen.jsx
+│   │       ├── CustomerDisplay.jsx
+│   │       └── SelfOrder.jsx
+│   └── utils/
+│       ├── auth.js          ← JWT decode, role check helpers
+│       └── formatCurrency.js
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 10 — KEY FEATURES SUMMARY
+────────────────────────────────────────────────────────────────────────────────
+
+AUTHENTICATION:
+  ✓ Role-based login (admin / kitchen / cashier)
+  ✓ JWT access + refresh tokens
+  ✓ Protected routes per role
+  ✓ Auto redirect based on role after login
+
+PRODUCT MANAGEMENT:
+  ✓ CRUD products with image upload
+  ✓ Category grouping
+  ✓ Product variants with extra pricing
+  ✓ Mark product as "send to kitchen" or not
+
+FLOOR & TABLE:
+  ✓ Multiple floors
+  ✓ Tables with seat count and active status
+  ✓ Visual floor map in POS terminal
+  ✓ Table status: Free / Occupied
+
+PAYMENT:
+  ✓ Cash payment with change calculation
+  ✓ Digital/Card payment
+  ✓ UPI QR — auto-generated from UPI ID
+  ✓ Payment confirmation screen
+  ✓ Payment linked to order and session
+
+KITCHEN DISPLAY:
+  ✓ Real-time WebSocket updates
+  ✓ Order tickets with stage badges
+  ✓ Stage progression: To Cook → Preparing → Completed
+  ✓ Item-level prepared marking (strikethrough)
+  ✓ Ticket number = Order number
+
+CUSTOMER DISPLAY:
+  ✓ Separate screen/route
+  ✓ Real-time order items view
+  ✓ Live payment status
+  ✓ Thank you screen post-payment
+
+SELF ORDERING:
+  ✓ Token-based (UUID)
+  ✓ Token generates scannable QR
+  ✓ Customer places order from phone
+  ✓ Auto-creates order and sends to kitchen
+
+REPORTING:
+  ✓ Dashboard with charts (Pie + Bar)
+  ✓ Filters: Period, Session, Staff, Product
+  ✓ Export PDF (reportlab)
+  ✓ Export XLS (openpyxl)
+  ✓ Total revenue, orders, top products
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 11 — STEP-BY-STEP BUILD ORDER (RECOMMENDED)
+────────────────────────────────────────────────────────────────────────────────
+
+PHASE 1 — Backend Foundation
+  Step 1 : Setup Django project + MySQL connection
+  Step 2 : Create custom User model with role field
+  Step 3 : Setup JWT auth (simplejwt) — signup + login APIs
+  Step 4 : Build Product + Category models and APIs
+  Step 5 : Build PaymentMethod model and APIs
+  Step 6 : Build Floor + Table models and APIs
+  Step 7 : Build POSSession model and APIs
+
+PHASE 2 — Backend Core Logic
+  Step 8 : Build Order + OrderItem models and APIs
+  Step 9 : Build Payment model and pay endpoint
+  Step 10: Build Kitchen API endpoints (status update, item prepared)
+  Step 11: Setup Django Channels + WebSocket consumer for kitchen
+  Step 12: Build UPI QR generation endpoint (using qrcode library)
+  Step 13: Build Self Order token + order placement endpoints
+  Step 14: Build Reports API (aggregation queries + filters)
+  Step 15: Build PDF export (reportlab) + XLS export (openpyxl)
+
+PHASE 3 — Frontend Foundation
+  Step 16: Setup React project with Tailwind + React Router
+  Step 17: Setup Axios with JWT interceptor + refresh logic
+  Step 18: Build AuthContext — login, logout, role-based redirect
+  Step 19: Build ProtectedRoute component
+  Step 20: Build shared Login + Signup pages
+
+PHASE 4 — Admin Portal
+  Step 21: Build Admin Dashboard with charts (recharts)
+  Step 22: Build Products page with Add/Edit/Delete modal
+  Step 23: Build Categories page
+  Step 24: Build Payment Methods page with toggle + UPI ID field
+  Step 25: Build Floors + Tables management page
+  Step 26: Build Terminal setup page
+  Step 27: Build Reports page with filters + export buttons
+
+PHASE 5 — Kitchen Portal
+  Step 28: Build Kitchen Login page
+  Step 29: Build Kitchen Display with order cards grid
+  Step 30: Connect WebSocket for real-time order updates
+  Step 31: Implement stage click (To Cook → Preparing → Completed)
+  Step 32: Implement item-level prepared marking
+
+PHASE 6 — POS / Cashier Portal
+  Step 33: Build POS Login + Open Session screen
+  Step 34: Build Floor View with table cards
+  Step 35: Build Order Screen — product grid + cart
+  Step 36: Build Send to Kitchen functionality
+  Step 37: Build Payment Screen — Cash / Digital / UPI QR tabs
+  Step 38: Build UPI QR modal with confirm/cancel flow
+  Step 39: Build Payment Confirmation screen
+  Step 40: Build Customer Display screen
+  Step 41: Build Self Order screen (token-based)
+
+PHASE 7 — Polish & Testing
+  Step 42: Add loading states, error handling, toast notifications
+  Step 43: Mobile responsiveness for POS and Kitchen screens
+  Step 44: End-to-end flow testing (Admin → Cashier → Kitchen → Payment)
+  Step 45: Report accuracy testing with filter combinations
+  Step 46: WebSocket stability testing under multiple concurrent orders
+  Step 47: Security review — JWT expiry, role enforcement, CORS
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 12 — DJANGO SETTINGS SNAPSHOT (MySQL + Channels + JWT)
+────────────────────────────────────────────────────────────────────────────────
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'pos_cafe_db',
+        'USER': 'root',
+        'PASSWORD': 'yourpassword',
+        'HOST': 'localhost',
+        'PORT': '3306',
+    }
+}
+
+INSTALLED_APPS = [
+    ...
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'corsheaders',
+    'channels',
+    'apps.authentication',
+    'apps.products',
+    'apps.floors',
+    'apps.payment_methods',
+    'apps.sessions',
+    'apps.orders',
+    'apps.kitchen',
+    'apps.self_order',
+    'apps.reports',
+]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+}
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # React dev server (Vite)
+]
+
+ASGI_APPLICATION = 'pos_backend.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {"hosts": [("127.0.0.1", 6379)]},
+    }
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 13 — REQUIREMENTS.TXT (Backend)
+────────────────────────────────────────────────────────────────────────────────
+
+Django>=4.2
+djangorestframework>=3.14
+djangorestframework-simplejwt>=5.3
+django-cors-headers>=4.3
+channels>=4.0
+channels-redis>=4.1
+mysqlclient>=2.2
+Pillow>=10.0
+qrcode>=7.4
+reportlab>=4.0
+openpyxl>=3.1
+django-filter>=23.0
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 14 — REACT PACKAGE.JSON DEPENDENCIES
+────────────────────────────────────────────────────────────────────────────────
+
+"dependencies": {
+  "react": "^18.2.0",
+  "react-dom": "^18.2.0",
+  "react-router-dom": "^6.14.0",
+  "axios": "^1.5.0",
+  "tailwindcss": "^3.3.0",
+  "recharts": "^2.8.0",
+  "qrcode.react": "^3.1.0",
+  "react-hot-toast": "^2.4.0",
+  "date-fns": "^2.30.0"
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+END OF DOCUMENT
+Odoo POS Cafe — Full Project Prompt
+Frontend: React JS | Backend: Python Django | Database: MySQL
+================================================================================

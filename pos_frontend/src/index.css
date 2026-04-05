@@ -1,0 +1,30 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: linear-gradient(135deg, #f0f9ff 0%, #f7fee7 50%, #e0f2fe 100%);
+  min-height: 100vh;
+  color: #1e293b;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+::selection { background: #bae6fd; color: #0c4a6e; }
+
+html.dark-theme {
+  filter: invert(0.92) hue-rotate(180deg);
+  background: white; /* Base layer to invert properly */
+}
+
+html.dark-theme img, html.dark-theme video {
+  filter: invert(1) hue-rotate(180deg);
+}
