@@ -1,5 +1,7 @@
 # Odoo POS Cafe
 
+![POS Cafe Overview](./POS%20Hackathon%2024%20hours.png)
+
 A comprehensive Point of Sale (POS) system for cafe management, built with Django REST Framework (Backend) and React + Vite (Frontend).
 
 ## Features
